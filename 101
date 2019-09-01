@@ -1,0 +1,85 @@
+1. Exploring natality dataset 
+This notebook illustrates:
+
+Exploring a BigQuery dataset using AI Platform Notebooks.
+# change these to try this notebook out
+BUCKET = 'qwiklabs-gcp-68f2a330042f1986'
+PROJECT = 'qwiklabs-gcp-68f2a330042f1986'
+REGION = 'us-west1-b'
+import os
+os.environ['BUCKET'] = BUCKET
+os.environ['PROJECT'] = PROJECT
+os.environ['REGION'] = REGION
+%%bash
+if ! gsutil ls | grep -q gs://${BUCKET}/; then
+  gsutil mb -l ${REGION} gs://${BUCKET}
+fi
+Explore data 
+The data is natality data (record of births in the US). My goal is to predict the baby's weight given a number of factors about the pregnancy and the baby's mother. Later, we will want to split the data into training and eval datasets. The hash of the year-month will be used for that -- this way, twins born on the same day won't end up in different cuts of the data.
+
+# Create SQL query using natality data after the year 2000
+query = """
+SELECT
+  weight_pounds,
+  is_male,
+  mother_age,
+  plurality,
+  gestation_weeks,
+  ABS(FARM_FINGERPRINT(CONCAT(CAST(YEAR AS STRING), CAST(month AS STRING)))) AS hashmonth
+FROM
+  publicdata.samples.natality
+WHERE year > 2000
+"""
+# Call BigQuery and examine in dataframe
+from google.cloud import bigquery
+df = bigquery.Client().query(query + " LIMIT 100").to_dataframe()
+df.head()
+weight_pounds	is_male	mother_age	plurality	gestation_weeks	hashmonth
+0	7.438397	True	22	1	40.0	7170969733900686954
+1	6.713076	True	16	1	37.0	1088037545023002395
+2	2.092187	True	27	1	27.0	1088037545023002395
+3	8.313632	False	24	1	39.0	5896567601480310696
+4	7.813183	True	30	2	37.0	2126480030009879160
+Let's write a query to find the unique values for each of the columns and the count of those values. This is important to ensure that we have enough examples of each data value, and to verify our hunch that the parameter has predictive value.
+
+# Create function that finds the number of records and the average weight for each value of the chosen column
+def get_distinct_values(column_name):
+  sql = """
+SELECT
+  {0},
+  COUNT(1) AS num_babies,
+  AVG(weight_pounds) AS avg_wt
+FROM
+  publicdata.samples.natality
+WHERE
+  year > 2000
+GROUP BY
+  {0}
+  """.format(column_name)
+  return bigquery.Client().query(sql).to_dataframe()
+# Bar plot to see is_male with avg_wt linear and num_babies logarithmic
+df = get_distinct_values('is_male')
+df.plot(x='is_male', y='num_babies', kind='bar');
+df.plot(x='is_male', y='avg_wt', kind='bar');
+
+
+# Line plots to see mother_age with avg_wt linear and num_babies logarithmic
+df = get_distinct_values('mother_age')
+df = df.sort_values('mother_age')
+df.plot(x='mother_age', y='num_babies');
+df.plot(x='mother_age', y='avg_wt');
+
+
+# Bar plot to see plurality(singleton, twins, etc.) with avg_wt linear and num_babies logarithmic
+df = get_distinct_values('plurality')
+df = df.sort_values('plurality')
+df.plot(x='plurality', y='num_babies', logy=True, kind='bar');
+df.plot(x='plurality', y='avg_wt', kind='bar');
+
+
+# Bar plot to see gestation_weeks with avg_wt linear and num_babies logarithmic
+df = get_distinct_values('gestation_weeks')
+df = df.sort_values('gestation_weeks')
+df.plot(x='gestation_weeks', y='num_babies', logy=True, kind='bar');
+df.plot(x='gestation_weeks', y='avg_wt', kind='bar');
+
